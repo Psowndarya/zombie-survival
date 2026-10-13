@@ -1,147 +1,92 @@
+import pygame
+import random
 
-import streamlit as st
-from exploration import LOCATIONS, explore_location
+BUILDINGS = [
+    pygame.Rect(110, 125, 180, 105),
+    pygame.Rect(385, 95, 145, 145),
+    pygame.Rect(690, 120, 210, 105),
+    pygame.Rect(880, 345, 120, 175),
+    pygame.Rect(610, 455, 190, 115),
+    pygame.Rect(275, 445, 170, 135),
+    pygame.Rect(70, 355, 115, 150),
+    pygame.Rect(455, 315, 120, 95),
+]
 
-st.set_page_config(
-    page_title="Zombie Survival",
-    page_icon="🧟",
-    layout="wide"
-)
 
-st.title("🧟 Zombie Survival")
-st.subheader("City Exploration")
+def clamp(value, low, high):
+    return max(low, min(value, high))
 
-st.write(
-    "Choose a location, check its danger level, "
-    "and explore to search for supplies."
-)
 
-# Initialize survivor status
-if "health" not in st.session_state:
-    st.session_state.health = 100
+def circle_rect_collision(pos, radius, rect):
+    closest_x = clamp(pos.x, rect.left, rect.right)
+    closest_y = clamp(pos.y, rect.top, rect.bottom)
+    dx = pos.x - closest_x
+    dy = pos.y - closest_y
+    return dx * dx + dy * dy < radius * radius
 
-if "food" not in st.session_state:
-    st.session_state.food = 50
 
-if "water" not in st.session_state:
-    st.session_state.water = 50
+def blocked(pos, radius, width, height):
+    if pos.x < radius or pos.x > width - radius:
+        return True
+    if pos.y < radius or pos.y > height - radius:
+        return True
+    return any(circle_rect_collision(pos, radius, rect) for rect in BUILDINGS)
 
-if "inventory" not in st.session_state:
-    st.session_state.inventory = []
 
-if "explored" not in st.session_state:
-    st.session_state.explored = []
+def move_with_collisions(pos, dx, dy, radius, width, height):
+    candidate = pygame.Vector2(pos.x + dx, pos.y)
+    if not blocked(candidate, radius, width, height):
+        pos.x = candidate.x
+    candidate = pygame.Vector2(pos.x, pos.y + dy)
+    if not blocked(candidate, radius, width, height):
+        pos.y = candidate.y
+    return pos
 
-if "last_result" not in st.session_state:
-    st.session_state.last_result = ""
 
-# Survivor dashboard
-st.header("Survivor Status")
-
-col1, col2, col3 = st.columns(3)
-
-col1.metric("❤️ Health", st.session_state.health)
-col2.metric("🍎 Food", st.session_state.food)
-col3.metric("💧 Water", st.session_state.water)
-
-# City exploration
-st.header("Explore the City")
-
-location_name = st.selectbox(
-    "Choose a location",
-    list(LOCATIONS.keys())
-)
-
-# Get details for the selected location
-location = LOCATIONS[location_name]
-
-st.write("**Description:**", location["description"])
-st.write("**Danger Level:**", location["danger"])
-st.write("**Possible supplies:**", ", ".join(location["supplies"]))
-
-# Explore button
-if st.button("Explore Location"):
-    if st.session_state.health <= 0:
-        st.error("Your survivor has no health left!")
-    else:
-        result = explore_location(location_name)
-        messages = []
-
-        if result["encounter"]:
-            damage = result["damage"]
-
-            st.session_state.health = max(
-                0,
-                st.session_state.health - damage
-            )
-
-            messages.append(
-                f"🧟 Zombie encounter! You lost {damage} health."
-            )
-        else:
-            messages.append(
-                "✅ No zombie encounter this time!"
-            )
-
-        # Collect the supply
-        supply = result["supply"]
-        st.session_state.inventory.append(supply)
-
-        # Apply supply benefits
-        if supply == "Medicine":
-            st.session_state.health = min(
-                100, st.session_state.health + 10
-            )
-        elif supply == "First Aid Kit":
-            st.session_state.health = min(
-                100, st.session_state.health + 15
-            )
-        elif supply == "Food":
-            st.session_state.food += 20
-        elif supply == "Water":
-            st.session_state.water += 20
-
-        messages.append(f"🎒 You found: {supply}")
-
-        if location_name not in st.session_state.explored:
-            st.session_state.explored.append(location_name)
-
-        st.session_state.last_result = "\n\n".join(messages)
-
-# Show latest result
-if st.session_state.last_result:
-    st.subheader("Exploration Result")
-    st.info(st.session_state.last_result)
-
-# Show all locations
-st.header("📍 Available Locations")
-
-for name, details in LOCATIONS.items():
-    with st.expander(name):
-        st.write(details["description"])
-        st.write("**Danger:**", details["danger"])
-        st.write(
-            "**Possible supplies:**",
-            ", ".join(details["supplies"])
+def random_open_position(width, height, min_distance_from=None):
+    for _ in range(500):
+        p = pygame.Vector2(
+            random.randint(35, width - 35),
+            random.randint(75, height - 35),
         )
+        if blocked(p, 18, width, height):
+            continue
+        if min_distance_from is not None and p.distance_to(min_distance_from) < 230:
+            continue
+        return p
+    return pygame.Vector2(width - 60, height - 60)
 
-        if name in st.session_state.explored:
-            st.success("Explored")
 
-# Inventory
-st.header("🎒 Survivor Inventory")
+def draw_world(surface, width, height):
+    surface.fill((12, 17, 20))
+    for x in range(0, width, 40):
+        pygame.draw.line(surface, (20, 29, 32), (x, 0), (x, height), 1)
+    for y in range(0, height, 40):
+        pygame.draw.line(surface, (20, 29, 32), (0, y), (width, y), 1)
 
-if st.session_state.inventory:
-    for item in st.session_state.inventory:
-        st.write(f"- {item}")
-else:
-    st.write("Your inventory is empty.")
+    # Road markings
+    pygame.draw.rect(surface, (17, 23, 26), (0, 265, width, 72))
+    for x in range(10, width, 95):
+        pygame.draw.line(surface, (52, 58, 57), (x, 300), (x + 42, 300), 2)
 
-# Progress
-st.write(
-    f"Locations explored: "
-    f"{len(st.session_state.explored)} / {len(LOCATIONS)}"
-)
+    for rect in BUILDINGS:
+        pygame.draw.rect(surface, (5, 8, 10), rect.move(6, 7), border_radius=4)
+        pygame.draw.rect(surface, (30, 39, 43), rect, border_radius=4)
+        pygame.draw.rect(surface, (65, 80, 84), rect, 2, border_radius=4)
+        for wx in range(rect.left + 13, rect.right - 12, 31):
+            for wy in range(rect.top + 13, rect.bottom - 10, 28):
+                window = pygame.Rect(wx, wy, 12, 9)
+                pygame.draw.rect(surface, (47, 65, 69), window, border_radius=1)
 
-if len(st.session_state.explored) == len(LOCATIONS):
-    st.success("You have explored every available location!")
+
+class Supply:
+    def __init__(self, width, height):
+        self.pos = random_open_position(width, height)
+        self.radius = 13
+
+    def draw(self, surface):
+        x, y = int(self.pos.x), int(self.pos.y)
+        pygame.draw.rect(surface, (105, 72, 35), (x - 13, y - 11, 26, 22), border_radius=3)
+        pygame.draw.rect(surface, (255, 202, 80), (x - 13, y - 11, 26, 22), 2, border_radius=3)
+        pygame.draw.line(surface, (255, 202, 80), (x, y - 8), (x, y + 8), 3)
+        pygame.draw.line(surface, (255, 202, 80), (x - 8, y), (x + 8, y), 3)
